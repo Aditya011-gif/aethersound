@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import audioEngine from '../audio/audioEngine';
 
-const CanvasVisualizer = ({ theme }) => {
+const CanvasVisualizer = ({ theme, isYoutubeActive }) => {
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -40,7 +40,7 @@ const CanvasVisualizer = ({ theme }) => {
     // Render loop
     const render = () => {
       // Get data from audioEngine
-      const { freqData } = audioEngine.getAnalyserData();
+      const { freqData } = audioEngine.getAnalyserData(isYoutubeActive);
       
       // Calculate frequency band averages
       let bass = 0;
@@ -207,7 +207,7 @@ const CanvasVisualizer = ({ theme }) => {
       cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', resizeCanvas);
     };
-  }, [theme]);
+  }, [theme, isYoutubeActive]);
 
   return (
     <canvas

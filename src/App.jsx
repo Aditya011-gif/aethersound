@@ -18,6 +18,7 @@ import CanvasVisualizer from './components/CanvasVisualizer';
 import SoundChannel from './components/SoundChannel';
 import Timer from './components/Timer';
 import Presets from './components/Presets';
+import MusicHub from './components/MusicHub';
 
 // Channel definitions
 const CHANNELS_META = [
@@ -71,6 +72,7 @@ function App() {
   const [keyboardClicks, setKeyboardClicks] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [isYoutubeActive, setIsYoutubeActive] = useState(false);
 
   // Sync state helper
   const syncState = () => {
@@ -107,6 +109,25 @@ function App() {
   const handleParamChange = (id, paramName, val) => {
     audioEngine.setParameter(id, paramName, val);
     syncState();
+  };
+
+  const handleYoutubeStateChange = (isActive) => {
+    setIsYoutubeActive(isActive);
+    if (isActive) {
+      if (audioEngine.channels.lofi.playing) {
+        audioEngine.stopChannel('lofi');
+        syncState();
+      }
+    }
+  };
+
+  const handleMusicPlayingChange = (isPlaying) => {
+    if (isPlaying) {
+      if (audioEngine.channels.lofi.playing) {
+        audioEngine.stopChannel('lofi');
+        syncState();
+      }
+    }
   };
 
   // Mute All toggle
@@ -194,7 +215,7 @@ function App() {
   return (
     <div className="app-container">
       {/* Dynamic Background Visualizer */}
-      <CanvasVisualizer theme={visualizerTheme} />
+      <CanvasVisualizer theme={visualizerTheme} isYoutubeActive={isYoutubeActive} />
 
       {/* Decorative Aurora Backdrop Blur Circles */}
       <div className="glow-circle gc-1"></div>
@@ -315,6 +336,10 @@ function App() {
         {/* Right Side: Pomodoro Timer & Preset Mixer */}
         <section className="utilities-section">
           <div className="section-header-label">Focus Dashboard</div>
+          <MusicHub 
+            onYoutubeStateChange={handleYoutubeStateChange}
+            onMusicPlayingChange={handleMusicPlayingChange}
+          />
           <Timer />
           <Presets 
             currentChannels={channels} 

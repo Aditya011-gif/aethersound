@@ -6,6 +6,10 @@ class AudioEngine {
     this.noiseBuffer = null;
     this.isInitialized = false;
 
+    // HTML5 Stream Audio nodes
+    this.radioAudio = null;
+    this.radioSource = null;
+
     // Define sound channels
     this.channels = {
       rain: {
@@ -15,7 +19,7 @@ class AudioEngine {
         sources: [],
         filterNode: null,
         lfoNode: null,
-        params: { intensity: 0.5 } // intensity controls filter cutoff and noise gain
+        params: { intensity: 0.5 } // intensity controls filter cutoff
       },
       wind: {
         playing: false,
@@ -40,14 +44,14 @@ class AudioEngine {
         gainNode: null,
         sources: [],
         filterNode: null,
-        params: { depth: 0.5 } // depth controls resonance and sweep range
+        params: { depth: 0.5 } // depth controls resonance
       },
       binaural: {
         playing: false,
         volume: 0.0,
         gainNode: null,
         sources: [],
-        params: { beatFreq: 5 } // beat frequency in Hz (offset between Left and Right)
+        params: { beatFreq: 5 } // beat frequency in Hz
       },
       lofi: {
         playing: false,
@@ -56,7 +60,14 @@ class AudioEngine {
         sources: [],
         schedulerTimeout: null,
         currentStep: 0,
-        params: { tempo: 0.5 } // tempo controls chord sequence speed
+        params: { tempo: 0.5 }
+      },
+      radio: {
+        playing: false,
+        volume: 0.5,
+        gainNode: null,
+        sources: [],
+        params: {}
       }
     };
   }
@@ -89,8 +100,19 @@ class AudioEngine {
       channel.gainNode.connect(this.masterGain);
     });
 
+    // Configure HTML5 Streaming Audio Player
+    this.radioAudio = new Audio();
+    this.radioAudio.crossOrigin = "anonymous";
+    
+    try {
+      this.radioSource = this.ctx.createMediaElementSource(this.radioAudio);
+      this.radioSource.connect(this.channels.radio.gainNode);
+    } catch (e) {
+      console.warn("Failed to create media element source node:", e);
+    }
+
     this.isInitialized = true;
-    console.log("Audio Engine Initialized.");
+    console.log("Audio Engine Initialized with Streaming Support.");
   }
 
   resume() {
@@ -186,6 +208,51 @@ class AudioEngine {
     }, 600);
   }
 
+  // Live Radio Stream playback
+  playRadioStream(url) {
+    if (!this.isInitialized) this.init();
+    this.resume();
+
+    const channel = this.channels.radio;
+    
+    try {
+      this.radioAudio.src = url;
+      this.radioAudio.load();
+      
+      channel.playing = true;
+      
+      // Fade in volume
+      channel.gainNode.gain.setValueAtTime(0, this.ctx.currentTime);
+      channel.gainNode.gain.linearRampToValueAtTime(channel.volume, this.ctx.currentTime + 0.6);
+
+      this.radioAudio.play();
+      console.log("Playing radio stream:", url);
+    } catch (e) {
+      console.error("Error playing radio stream:", e);
+    }
+  }
+
+  stopRadioStream() {
+    const channel = this.channels.radio;
+    if (!channel.playing) return;
+
+    channel.playing = false;
+
+    if (channel.gainNode) {
+      channel.gainNode.gain.setValueAtTime(channel.gainNode.gain.value, this.ctx.currentTime);
+      channel.gainNode.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.4);
+    }
+
+    setTimeout(() => {
+      if (!channel.playing && this.radioAudio) {
+        try {
+          this.radioAudio.pause();
+          this.radioAudio.src = "";
+        } catch (e) {}
+      }
+    }, 500);
+  }
+
   // Set the target volume of a channel
   setVolume(name, val) {
     const channel = this.channels[name];
@@ -206,29 +273,24 @@ class AudioEngine {
 
     if (name === 'rain' && paramName === 'intensity') {
       if (channel.filterNode) {
-        // High intensity = higher filter cutoff (clearer/brighter rain)
         const cutoff = 400 + val * 1200;
         channel.filterNode.frequency.setValueAtTime(cutoff, this.ctx.currentTime);
       }
     } else if (name === 'wind' && paramName === 'speed') {
       if (channel.lfoNode && channel.lfoGain) {
-        // Higher speed = faster wind fluctuations and wider sweep
         channel.lfoNode.frequency.setValueAtTime(0.05 + val * 0.25, this.ctx.currentTime);
         channel.lfoGain.gain.setValueAtTime(100 + val * 300, this.ctx.currentTime);
       }
     } else if (name === 'campfire' && paramName === 'crackleRate') {
-      // Re-initialize crackle interval timer
       if (channel.crackleInterval) {
         clearInterval(channel.crackleInterval);
       }
       this.setupCampfireCrackling();
     } else if (name === 'drone' && paramName === 'depth') {
       if (channel.filterNode) {
-        // Higher depth = more filter resonance (Q)
         channel.filterNode.Q.setValueAtTime(2 + val * 10, this.ctx.currentTime);
       }
     } else if (name === 'binaural' && paramName === 'beatFreq') {
-      // Adjust Right oscillator to shift offset frequency
       const leftFreq = 100;
       const rightOsc = channel.sources.find(src => src.label === 'rightOsc');
       if (rightOsc) {
@@ -241,28 +303,21 @@ class AudioEngine {
   setupRainSynth() {
     const channel = this.channels.rain;
     
-    // Create noise source
     const noiseSource = this.ctx.createBufferSource();
     noiseSource.buffer = this.noiseBuffer;
     noiseSource.loop = true;
 
-    // Filter noise to sound like rain
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
     const initialCutoff = 400 + channel.params.intensity * 1200;
     filter.frequency.value = initialCutoff;
     filter.Q.value = 1.0;
 
-    // Modulate gain slightly to simulate natural variance
     const amplitudeLFO = this.ctx.createOscillator();
-    amplitudeLFO.frequency.value = 0.2; // 0.2 Hz
+    amplitudeLFO.frequency.value = 0.2;
     const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 0.15; // Modulate gain by up to 15%
+    lfoGain.gain.value = 0.15;
 
-    const lfoBiasNode = this.ctx.createGain();
-    lfoBiasNode.gain.value = 0.85;
-
-    // Route
     amplitudeLFO.connect(lfoGain);
     
     const noiseGain = this.ctx.createGain();
@@ -272,7 +327,6 @@ class AudioEngine {
     filter.connect(noiseGain);
     noiseGain.connect(channel.gainNode);
 
-    // Start nodes
     noiseSource.start();
     amplitudeLFO.start();
 
@@ -284,34 +338,28 @@ class AudioEngine {
   setupWindSynth() {
     const channel = this.channels.wind;
 
-    // Noise source
     const noiseSource = this.ctx.createBufferSource();
     noiseSource.buffer = this.noiseBuffer;
     noiseSource.loop = true;
 
-    // Bandpass filter with high resonance (creates a whistle/howl)
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
     filter.frequency.value = 300;
-    filter.Q.value = 5.0; // High Q for howling
+    filter.Q.value = 5.0;
 
-    // LFO to slowly sweep filter frequency (wind gusts)
     const lfo = this.ctx.createOscillator();
     lfo.type = 'sine';
-    lfo.frequency.value = 0.05 + channel.params.speed * 0.25; // How fast wind gust frequency changes
+    lfo.frequency.value = 0.05 + channel.params.speed * 0.25;
 
     const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 100 + channel.params.speed * 300; // Sweep range in Hz
+    lfoGain.gain.value = 100 + channel.params.speed * 300;
 
-    // Connect LFO to filter frequency
     lfo.connect(lfoGain);
     lfoGain.connect(filter.frequency);
 
-    // Route audio
     noiseSource.connect(filter);
     filter.connect(channel.gainNode);
 
-    // Start
     noiseSource.start();
     lfo.start();
 
@@ -325,38 +373,31 @@ class AudioEngine {
   setupCampfireSynth() {
     const channel = this.channels.campfire;
 
-    // 1. Warm low rumble (constant)
     const noiseSource = this.ctx.createBufferSource();
     noiseSource.buffer = this.noiseBuffer;
     noiseSource.loop = true;
 
     const lowpass = this.ctx.createBiquadFilter();
     lowpass.type = 'lowpass';
-    lowpass.frequency.value = 75; // Sub-bass flame rumble
+    lowpass.frequency.value = 75;
 
     noiseSource.connect(lowpass);
     lowpass.connect(channel.gainNode);
     noiseSource.start();
     channel.sources.push(noiseSource);
 
-    // 2. Crackling impulses (periodic scheduler)
     this.setupCampfireCrackling();
   }
 
   setupCampfireCrackling() {
     const channel = this.channels.campfire;
-    const crackleRate = channel.params.crackleRate; // 0 to 1
+    const crackleRate = channel.params.crackleRate;
 
-    // Schedule next crackle based on rate
     const scheduleNext = () => {
       if (!channel.playing) return;
-
       this.triggerCrackle();
-
-      // Interval timing: higher crackleRate = smaller delay
-      const baseDelay = 1500 - crackleRate * 1200; // 1500ms down to 300ms
+      const baseDelay = 1500 - crackleRate * 1200;
       const randomDelay = Math.random() * baseDelay + 100;
-
       channel.crackleInterval = setTimeout(scheduleNext, randomDelay);
     };
 
@@ -367,16 +408,14 @@ class AudioEngine {
     if (!this.isInitialized) return;
     const channel = this.channels.campfire;
 
-    // Crackle shape: fast attack, exponential decay click
     const crackleGain = this.ctx.createGain();
     crackleGain.gain.setValueAtTime(0.0001, this.ctx.currentTime);
     crackleGain.gain.linearRampToValueAtTime(Math.random() * 0.15 + 0.05, this.ctx.currentTime + 0.001);
     crackleGain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + Math.random() * 0.05 + 0.015);
 
-    // Filter to clicky frequency range
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
-    filter.frequency.value = 1200 + Math.random() * 2200; // High frequency crackle
+    filter.frequency.value = 1200 + Math.random() * 2200;
     filter.Q.value = 4.0;
 
     const source = this.ctx.createBufferSource();
@@ -388,7 +427,6 @@ class AudioEngine {
 
     source.start();
 
-    // Self cleanup after completion
     setTimeout(() => {
       try { source.stop(); } catch(e) {}
       try { source.disconnect(); } catch(e) {}
@@ -401,40 +439,33 @@ class AudioEngine {
   setupDroneSynth() {
     const channel = this.channels.drone;
 
-    // Low Sawtooth Wave Oscillator
     const osc1 = this.ctx.createOscillator();
     osc1.type = 'sawtooth';
-    osc1.frequency.value = 55; // A1 note
+    osc1.frequency.value = 55;
 
-    // Second oscillator slightly detuned for chorus effect
     const osc2 = this.ctx.createOscillator();
     osc2.type = 'sawtooth';
-    osc2.frequency.value = 55.4; // Slightly detuned
+    osc2.frequency.value = 55.4;
 
-    // Resonant low-pass filter to make it warm and spacey
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
     filter.frequency.value = 110;
-    filter.Q.value = 2 + channel.params.depth * 10; // Resonance
+    filter.Q.value = 2 + channel.params.depth * 10;
 
-    // Modulate filter cutoff slowly for "breathing" engine effect
     const lfo = this.ctx.createOscillator();
     lfo.type = 'sine';
-    lfo.frequency.value = 0.08; // Very slow 0.08 Hz
+    lfo.frequency.value = 0.08;
 
     const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 40; // Sweeps filter between 70Hz and 150Hz
+    lfoGain.gain.value = 40;
 
-    // Connect LFO to filter cutoff
     lfo.connect(lfoGain);
     lfoGain.connect(filter.frequency);
 
-    // Route
     osc1.connect(filter);
     osc2.connect(filter);
     filter.connect(channel.gainNode);
 
-    // Start
     osc1.start();
     osc2.start();
     lfo.start();
@@ -443,40 +474,35 @@ class AudioEngine {
     channel.filterNode = filter;
   }
 
-  // --- Binaural Beats (Focus Drone) Synthesis ---
+  // --- Binaural Beats Synthesis ---
   setupBinauralSynth() {
     const channel = this.channels.binaural;
     const beatFreq = channel.params.beatFreq;
 
-    const leftFreq = 100; // Base carrier frequency 100Hz (deep sine)
-    const rightFreq = leftFreq + beatFreq; // Beat frequency offset
+    const leftFreq = 100;
+    const rightFreq = leftFreq + beatFreq;
 
-    // Left oscillator
     const oscLeft = this.ctx.createOscillator();
     oscLeft.type = 'sine';
     oscLeft.frequency.value = leftFreq;
 
-    // Right oscillator
     const oscRight = this.ctx.createOscillator();
     oscRight.type = 'sine';
     oscRight.frequency.value = rightFreq;
-    oscRight.label = 'rightOsc'; // tag to find and update frequency later
+    oscRight.label = 'rightOsc';
 
-    // Stereo Panning
     const pannerLeft = this.ctx.createStereoPanner();
-    pannerLeft.pan.value = -1.0; // Pan hard left
+    pannerLeft.pan.value = -1.0;
 
     const pannerRight = this.ctx.createStereoPanner();
-    pannerRight.pan.value = 1.0; // Pan hard right
+    pannerRight.pan.value = 1.0;
 
-    // Route
     oscLeft.connect(pannerLeft);
     pannerLeft.connect(channel.gainNode);
 
     oscRight.connect(pannerRight);
     pannerRight.connect(channel.gainNode);
 
-    // Start
     oscLeft.start();
     oscRight.start();
 
@@ -488,8 +514,6 @@ class AudioEngine {
     const channel = this.channels.lofi;
     channel.currentStep = 0;
 
-    // Chord Progression (electric piano triangle waves with soft envelope)
-    // Abmaj7 (Ab, C, Eb, G) -> Gm7 (G, Bb, D, F) -> Fm7 (F, Ab, C, Eb) -> Bb7 (Bb, D, F, Ab)
     this.lofiChords = [
       [103.83, 130.81, 155.56, 196.00], // Abmaj7
       [98.00, 116.54, 146.83, 174.61],  // Gm7
@@ -499,24 +523,17 @@ class AudioEngine {
 
     const playLoop = () => {
       if (!channel.playing) return;
-
       const step = channel.currentStep % this.lofiChords.length;
       const frequencies = this.lofiChords[step];
 
-      // Play soft chords
       this.triggerLofiChord(frequencies);
-
-      // Play soft kick beat
       this.triggerSoftKick();
 
-      // Trigger a soft rimshot/snare on half beats
       setTimeout(() => {
         if (channel.playing) this.triggerSoftSnare();
       }, 1000);
 
       channel.currentStep++;
-      
-      // Schedule next chord in 4 seconds
       channel.schedulerTimeout = setTimeout(playLoop, 4000);
     };
 
@@ -526,21 +543,20 @@ class AudioEngine {
   triggerLofiChord(frequencies) {
     const channel = this.channels.lofi;
 
-    // Play notes together with slow attack and release
     frequencies.forEach(freq => {
       const osc = this.ctx.createOscillator();
-      osc.type = 'triangle'; // Soft harmonic structure
+      osc.type = 'triangle';
       osc.frequency.value = freq;
 
       const gain = this.ctx.createGain();
       gain.gain.setValueAtTime(0.0001, this.ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.08, this.ctx.currentTime + 0.8); // 800ms fade-in
+      gain.gain.linearRampToValueAtTime(0.08, this.ctx.currentTime + 0.8);
       gain.gain.setValueAtTime(0.08, this.ctx.currentTime + 2.5);
-      gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 3.8); // Fade-out
+      gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 3.8);
 
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.value = 600; // Warm filter roll-off
+      filter.frequency.value = 600;
 
       osc.connect(filter);
       filter.connect(gain);
@@ -548,7 +564,6 @@ class AudioEngine {
 
       osc.start();
       
-      // Stop and clean up after 4 seconds
       setTimeout(() => {
         try { osc.stop(); } catch(e) {}
         try { osc.disconnect(); } catch(e) {}
@@ -563,7 +578,6 @@ class AudioEngine {
     const osc = this.ctx.createOscillator();
     osc.type = 'sine';
 
-    // Kick pitch sweep: 120Hz -> 50Hz
     osc.frequency.setValueAtTime(120, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(45, this.ctx.currentTime + 0.12);
 
@@ -587,7 +601,6 @@ class AudioEngine {
     const noiseSource = this.ctx.createBufferSource();
     noiseSource.buffer = this.noiseBuffer;
 
-    // Filter to snare range
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
     filter.frequency.value = 1000;
@@ -615,19 +628,16 @@ class AudioEngine {
     if (!this.isInitialized) return;
     this.resume();
 
-    // High frequency tick (mechanical switch click)
     const osc = this.ctx.createOscillator();
     osc.type = 'sine';
     
-    // Pitch sweep for organic click: 2400Hz -> 1200Hz
     osc.frequency.setValueAtTime(2400 + Math.random() * 400, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(1000, this.ctx.currentTime + 0.008);
 
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.03, this.ctx.currentTime); // Soft volume click
+    gain.gain.setValueAtTime(0.03, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.01);
 
-    // Resonant bandpass filter
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'bandpass';
     filter.frequency.value = 2000;
@@ -673,23 +683,36 @@ class AudioEngine {
       }, (delay + duration + 0.5) * 1000);
     };
 
-    // A beautiful meditation bell triad chord (E Major: E4, G#4, B4, E5)
     playTone(329.63, 0.0, 0.25, 3.5);  // E4
     playTone(415.30, 0.2, 0.20, 3.0);  // G#4
     playTone(493.88, 0.4, 0.15, 2.5);  // B4
     playTone(659.25, 0.6, 0.12, 2.0);  // E5
   }
 
-  // Get analyser byte frequency data for canvas visualizer
-  getAnalyserData() {
+  // Get analyser byte frequency data for canvas visualizer (with YouTube pulse simulation)
+  getAnalyserData(isYoutubeActive = false) {
     if (!this.isInitialized || !this.analyser) {
       return { freqData: new Uint8Array(0), timeData: new Uint8Array(0) };
     }
     const bufferLength = this.analyser.frequencyBinCount;
     const freqData = new Uint8Array(bufferLength);
     const timeData = new Uint8Array(bufferLength);
+    
     this.analyser.getByteFrequencyData(freqData);
     this.analyser.getByteTimeDomainData(timeData);
+
+    // If YouTube is active, simulate a pulsing pattern on the canvas
+    if (isYoutubeActive) {
+      const time = Date.now() * 0.003;
+      const pulse = Math.abs(Math.sin(time)) * 60 + 30; // base pulse level
+      for (let i = 0; i < bufferLength; i++) {
+        const decay = Math.exp(-i / 15);
+        const jitter = Math.random() * 15;
+        freqData[i] = Math.max(freqData[i], (pulse * decay) + jitter);
+        timeData[i] = Math.max(timeData[i], 128 + Math.sin(time + i * 0.1) * (pulse * 0.2));
+      }
+    }
+
     return { freqData, timeData };
   }
 }
