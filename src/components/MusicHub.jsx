@@ -27,12 +27,12 @@ const RADIO_STATIONS = [
   { name: 'Synthwave Retro', url: 'https://stream.zeno.fm/g6t5r223598uv', description: 'Outrun and vaporwave beats for energy.' }
 ];
 
-// Curated YouTube ambient videos
+// Curated YouTube ambient videos (tested stable video IDs)
 const YOUTUBE_VIDEOS = [
-  { name: 'Lofi Girl Live Beats 🌸', id: 'jfKfPfyJRdk', description: 'The legendary study lofi hip hop livestream.' },
-  { name: 'Rainy Kyoto Café ☕', id: '5wXBL_dZJk0', description: 'Cozy jazz and rain visual ambience in Japan.' },
-  { name: 'Tokyo Rain Walking 🌧️', id: 'hXd35eNfJ4M', description: 'Rain sounds and visual binaural street walk.' },
-  { name: 'Deep Space Explorer 🚀', id: 'T-8152HnJgU', description: 'Calm interstellar orchestral drones and graphics.' }
+  { name: 'Lofi Girl Study Session 🌸', id: '5qap5aO4i9A', description: 'Classic lofi study beats compilation by Lofi Girl.' },
+  { name: '3 AM Coding Beats 💻', id: 'akrgSiPLngY', description: 'Atmospheric lofi hip hop mix tailored for developers.' },
+  { name: 'Tokyo Rain Walk 🌧️', id: 'hXd35eNfJ4M', description: 'Calming rain sounds and visual walking tour in Tokyo.' },
+  { name: 'Synthwave Coding Focus 🚀', id: 'S810accnrRc', description: 'Retro synthwave and cyberpunk beats for focus.' }
 ];
 
 const MusicHub = ({ onYoutubeStateChange, onMusicPlayingChange }) => {
@@ -45,8 +45,10 @@ const MusicHub = ({ onYoutubeStateChange, onMusicPlayingChange }) => {
   const [customStreamUrl, setCustomStreamUrl] = useState('');
 
   // YouTube state
+  const [videos, setVideos] = useState(YOUTUBE_VIDEOS);
   const [currentVideoIdx, setCurrentVideoIdx] = useState(0);
   const [isYoutubeActive, setIsYoutubeActive] = useState(false);
+  const [customYtUrl, setCustomYtUrl] = useState('');
 
   // Set default audio volume on engine load
   useEffect(() => {
@@ -152,6 +154,52 @@ const MusicHub = ({ onYoutubeStateChange, onMusicPlayingChange }) => {
         setIsYoutubeActive(true);
         onYoutubeStateChange(true);
       }, 100);
+    }
+  };
+
+  const parseYoutubeId = (url) => {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : url.trim();
+  };
+
+  const handleLoadCustomYoutube = (e) => {
+    e.preventDefault();
+    if (!customYtUrl.trim()) return;
+
+    audioEngine.triggerKeyboardClick();
+    const parsedId = parseYoutubeId(customYtUrl);
+
+    if (parsedId.length === 11) {
+      const newVideo = {
+        name: 'Custom YouTube Video',
+        id: parsedId,
+        description: `User-loaded ID: ${parsedId}`
+      };
+
+      const updatedVideos = [...videos, newVideo];
+      setVideos(updatedVideos);
+      const newIdx = updatedVideos.length - 1;
+      setCurrentVideoIdx(newIdx);
+      setCustomYtUrl('');
+
+      // Stop radio if active
+      if (isRadioPlaying) {
+        audioEngine.stopRadioStream();
+        setIsRadioPlaying(false);
+        onMusicPlayingChange(false);
+      }
+
+      // Auto-play / reload player
+      setIsYoutubeActive(false);
+      onYoutubeStateChange(false);
+      
+      setTimeout(() => {
+        setIsYoutubeActive(true);
+        onYoutubeStateChange(true);
+      }, 150);
+    } else {
+      alert("Invalid YouTube URL or Video ID. Please paste a valid link (e.g., https://www.youtube.com/watch?v=...)");
     }
   };
 
@@ -269,7 +317,7 @@ const MusicHub = ({ onYoutubeStateChange, onMusicPlayingChange }) => {
                 <Youtube size={24} className="yt-logo" />
               </div>
               <div className="yt-details">
-                <h3>{YOUTUBE_VIDEOS[currentVideoIdx].name}</h3>
+                <h3>{videos[currentVideoIdx]?.name || 'Select Video'}</h3>
                 <p>Loads via standard YouTube Embedded Frame player. Visualizer reacts via beat simulation.</p>
               </div>
               <button 
@@ -281,11 +329,11 @@ const MusicHub = ({ onYoutubeStateChange, onMusicPlayingChange }) => {
             </div>
 
             {/* Visual Embed IFrame */}
-            {isYoutubeActive && (
+            {isYoutubeActive && videos[currentVideoIdx] && (
               <div className="youtube-player-wrapper">
                 <iframe
                   className="youtube-iframe"
-                  src={`https://www.youtube.com/embed/${YOUTUBE_VIDEOS[currentVideoIdx].id}?enablejsapi=1&autoplay=1&controls=1&rel=0&origin=${window.location.origin}`}
+                  src={`https://www.youtube.com/embed/${videos[currentVideoIdx].id}?enablejsapi=1&autoplay=1&controls=1&rel=0&origin=${window.location.origin}`}
                   title="YouTube Ambient Player"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
@@ -295,7 +343,7 @@ const MusicHub = ({ onYoutubeStateChange, onMusicPlayingChange }) => {
 
             {/* Curated list */}
             <div className="video-list">
-              {YOUTUBE_VIDEOS.map((video, idx) => (
+              {videos.map((video, idx) => (
                 <button
                   key={idx}
                   className={`video-item ${currentVideoIdx === idx ? 'selected' : ''}`}
@@ -309,6 +357,23 @@ const MusicHub = ({ onYoutubeStateChange, onMusicPlayingChange }) => {
                 </button>
               ))}
             </div>
+
+            {/* Custom YouTube URL Loader Form */}
+            <form onSubmit={handleLoadCustomYoutube} className="custom-stream-form">
+              <div className="input-group">
+                <Link2 size={14} className="input-icon" />
+                <input
+                  type="text"
+                  placeholder="Paste YouTube video link or 11-char ID..."
+                  value={customYtUrl}
+                  onChange={(e) => setCustomYtUrl(e.target.value)}
+                  className="stream-input"
+                />
+                <button type="submit" className="load-stream-btn" disabled={!customYtUrl.trim()}>
+                  Load
+                </button>
+              </div>
+            </form>
           </div>
         )}
       </div>
